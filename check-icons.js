@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,7 @@ const iconFolders = fs.readdirSync(iconBaseDir).filter(folder =>
 // Aus jedem Ordner ein IconType-Objekt erstellen
 const iconTypes = iconFolders.map(folder => ({
   folder,
+  folderPrefix: `i-${folder}-`,
   regex: new RegExp(`i-${folder}-([\\w-]+)`, 'g'),
 }));
 
@@ -69,10 +71,14 @@ const iconMap = new Map(); // key: iconName => Set of folders
 const usedIconsPerFolder = new Map(); // folder => Set of used icons
 const allExistingIconsPerFolder = new Map(); // folder => Set of all available icons
 
-iconTypes.forEach(({ folder, regex }) => {
-  const prefix = `i-${folder}-`;
+// Überprüfungsarten (Standardmäßig alle aktiv)
+const checkMissing = true;
+const checkConflicts = true;
+const checkUnused = true;
+
+iconTypes.forEach(({ folder, folderPrefix, regex }) => {
   const readableLabel = `Ordner "${folder}"`;
-  const usages = extractIconUsages(allFiles, regex, prefix);
+  const usages = extractIconUsages(allFiles, regex, folderPrefix);
 
   // Bestehende Icons im Ordner sammeln
   const existingIcons = getExistingIcons(path.join(iconBaseDir, folder));
@@ -81,7 +87,7 @@ iconTypes.forEach(({ folder, regex }) => {
   const usedIcons = new Set();
 
   usages.forEach((locations, key) => {
-    const iconName = key.replace(prefix, '');
+    const iconName = key.replace(folderPrefix, '');
     usedIcons.add(iconName);
     allUsages.set(key, locations);
 
@@ -91,66 +97,73 @@ iconTypes.forEach(({ folder, regex }) => {
 
   usedIconsPerFolder.set(folder, usedIcons);
 
-  const missingIcons = [...usedIcons].filter(icon => !existingIcons.has(icon));
+  // Fehlen von Icons melden
+  if (checkMissing) {
+    const missingIcons = [...usedIcons].filter(icon => !existingIcons.has(icon));
 
-  if (missingIcons.length > 0) {
-    console.log(`\n❌ Fehlende Icons aus ${readableLabel}:`);
-    missingIcons.forEach((icon) => {
-      const fullKey = `${prefix}${icon}`;
-      console.log(`\n🔸 Icon "${icon}"`);
-      usages.get(fullKey)?.forEach(({ file, line }) => {
-        console.log(`  ↪ ${file}:${line}`);
+    if (missingIcons.length > 0) {
+      console.log(`\n❌ Fehlende Icons aus ${readableLabel}:`);
+      missingIcons.forEach((icon) => {
+        const fullKey = `${folderPrefix}${icon}`;
+        console.log(`\n🔸 Icon "${icon}"`);
+        usages.get(fullKey)?.forEach(({ file, line }) => {
+          console.log(`  ↪ ${file}:${line}`);
+        });
       });
-    });
+    }
+    else {
+      console.log(`✅ Keine fehlenden Icons in ${readableLabel}.`);
+    }
   }
-  else {
-    console.log(`\n✅ Alle Icons aus ${readableLabel} sind vorhanden.`);
-  }
-});
 
-// Mehrfachverwendungen mit verschiedenen Präfixen
-console.log(`\n🔎 Icons, die mit mehreren Ordnern verwendet werden:`);
-let conflictFound = false;
-iconMap.forEach((folders, iconName) => {
-  if (folders.size > 1) {
-    conflictFound = true;
-    console.log(`\n⚠️  Icon "${iconName}" wird in mehreren Ordnern verwendet: ${[...folders].join(', ')}`);
-    folders.forEach((folder) => {
-      const prefix = `i-${folder}-`;
-      const fullKey = `${prefix}${iconName}`;
-      const usages = allUsages.get(fullKey);
-      if (usages) {
-        usages.forEach(({ file, line }) => {
-          console.log(`  ↪ ${file}:${line} (aus Ordner "${folder}")`);
+  // Konflikte mit mehreren Präfixen melden
+  if (checkConflicts) {
+    console.log(`\n🔎 Icons, die mit mehreren Ordnern verwendet werden:`);
+    let conflictFound = false;
+    iconMap.forEach((folders, iconName) => {
+      if (folders.size > 1) {
+        conflictFound = true;
+        console.log(`\n⚠️  Icon "${iconName}" wird in mehreren Ordnern verwendet: ${[...folders].join(', ')}`);
+        folders.forEach((folder) => {
+          const prefix = `i-${folder}-`;
+          const fullKey = `${prefix}${iconName}`;
+          const usages = allUsages.get(fullKey);
+          if (usages) {
+            usages.forEach(({ file, line }) => {
+              console.log(`  ↪ ${file}:${line} (aus Ordner "${folder}")`);
+            });
+          }
         });
       }
     });
+
+    if (!conflictFound) {
+      console.log('✅ Kein Icon wurde mit mehreren Ordnern (Präfixen) verwendet.');
+    }
   }
-});
 
-if (!conflictFound) {
-  console.log('✅ Kein Icon wurde mit mehreren Ordnern (Präfixen) verwendet.');
-}
+  // Ungenutzte Icons melden
+  if (checkUnused) {
+    console.log(`\n🧹 Icons, die in den jeweiligen Ordnern vorhanden, aber nirgends verwendet werden:`);
 
-// Ungenutzte Icons anzeigen
-console.log(`\n🧹 Icons, die in den jeweiligen Ordnern vorhanden, aber nirgends verwendet werden:`);
+    let unusedFound = false;
 
-let unusedFound = false;
+    iconFolders.forEach((folder) => {
+      const used = usedIconsPerFolder.get(folder) || new Set();
+      const all = allExistingIconsPerFolder.get(folder) || new Set();
 
-iconFolders.forEach((folder) => {
-  const used = usedIconsPerFolder.get(folder) || new Set();
-  const all = allExistingIconsPerFolder.get(folder) || new Set();
-
-  const unused = [...all].filter(icon => !used.has(icon));
-  if (unused.length > 0) {
-    unusedFound = true;
-    console.log(`\n📁 Ordner "${folder}":`);
-    unused.forEach((icon) => {
-      console.log(`  - ${icon}.svg`);
+      const unused = [...all].filter(icon => !used.has(icon));
+      if (unused.length > 0) {
+        unusedFound = true;
+        console.log(`\n📁 Ordner "${folder}":`);
+        unused.forEach((icon) => {
+          console.log(`  - ${icon}.svg`);
+        });
+      }
     });
+
+    if (!unusedFound) {
+      console.log('✅ Alle Icons aus allen Ordnern werden irgendwo verwendet.');
+    }
   }
 });
-
-if (!unusedFound) {
-  console.log('✅ Alle Icons aus allen Ordnern werden irgendwo verwendet.');
-}
