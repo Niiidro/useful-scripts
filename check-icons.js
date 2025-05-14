@@ -66,31 +66,39 @@ function getExistingIcons(dir) {
 const allFiles = getAllFiles(jsDir);
 const allUsages = new Map(); // key: i-[prefix]-name => [{file, line}]
 const iconMap = new Map(); // key: iconName => Set of folders
+const usedIconsPerFolder = new Map(); // folder => Set of used icons
+const allExistingIconsPerFolder = new Map(); // folder => Set of all available icons
 
 iconTypes.forEach(({ folder, regex }) => {
   const prefix = `i-${folder}-`;
   const readableLabel = `Ordner "${folder}"`;
   const usages = extractIconUsages(allFiles, regex, prefix);
 
+  // Bestehende Icons im Ordner sammeln
+  const existingIcons = getExistingIcons(path.join(iconBaseDir, folder));
+  allExistingIconsPerFolder.set(folder, existingIcons);
+
+  const usedIcons = new Set();
+
   usages.forEach((locations, key) => {
     const iconName = key.replace(prefix, '');
+    usedIcons.add(iconName);
     allUsages.set(key, locations);
 
     if (!iconMap.has(iconName)) iconMap.set(iconName, new Set());
     iconMap.get(iconName).add(folder);
   });
 
-  const existingIcons = getExistingIcons(path.join(iconBaseDir, folder));
-  const missingIcons = [...usages.keys()]
-    .map(k => k.replace(prefix, ''))
-    .filter(icon => !existingIcons.has(icon));
+  usedIconsPerFolder.set(folder, usedIcons);
+
+  const missingIcons = [...usedIcons].filter(icon => !existingIcons.has(icon));
 
   if (missingIcons.length > 0) {
     console.log(`\n❌ Fehlende Icons aus ${readableLabel}:`);
     missingIcons.forEach((icon) => {
       const fullKey = `${prefix}${icon}`;
       console.log(`\n🔸 Icon "${icon}"`);
-      usages.get(fullKey).forEach(({ file, line }) => {
+      usages.get(fullKey)?.forEach(({ file, line }) => {
         console.log(`  ↪ ${file}:${line}`);
       });
     });
@@ -122,4 +130,27 @@ iconMap.forEach((folders, iconName) => {
 
 if (!conflictFound) {
   console.log('✅ Kein Icon wurde mit mehreren Ordnern (Präfixen) verwendet.');
+}
+
+// Ungenutzte Icons anzeigen
+console.log(`\n🧹 Icons, die in den jeweiligen Ordnern vorhanden, aber nirgends verwendet werden:`);
+
+let unusedFound = false;
+
+iconFolders.forEach((folder) => {
+  const used = usedIconsPerFolder.get(folder) || new Set();
+  const all = allExistingIconsPerFolder.get(folder) || new Set();
+
+  const unused = [...all].filter(icon => !used.has(icon));
+  if (unused.length > 0) {
+    unusedFound = true;
+    console.log(`\n📁 Ordner "${folder}":`);
+    unused.forEach((icon) => {
+      console.log(`  - ${icon}.svg`);
+    });
+  }
+});
+
+if (!unusedFound) {
+  console.log('✅ Alle Icons aus allen Ordnern werden irgendwo verwendet.');
 }
